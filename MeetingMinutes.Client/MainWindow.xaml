@@ -22,7 +22,7 @@
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/Markdig.Wpf;component/Styles/Markdown.xaml"/>
+                <ResourceDictionary Source="pack://application:,,,/Markdig.Wpf;component/Styles/MarkdownStyle.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Window.Resources>
