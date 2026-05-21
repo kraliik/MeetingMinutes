@@ -19,13 +19,6 @@
         FontFamily="{DynamicResource MaterialDesignFont}"
         Style="{StaticResource MaterialDesignWindow}">
 
-    <Window.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/Markdig.Wpf;component/Styles/MarkdownStyle.xaml"/>
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Window.Resources>
     <materialDesign:DialogHost Identifier="RootDialog">
     <materialDesign:Card Margin="8" Padding="8"
                          materialDesign:ElevationAssist.Elevation="Dp4">
