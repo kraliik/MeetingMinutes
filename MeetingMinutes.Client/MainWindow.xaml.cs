@@ -488,7 +488,7 @@ namespace MeetingMinutes
             SummarizeButton.Content = "Zrušit";
             SummarizeButton.ToolTip = "Klikněte pro zrušení";
             PromptBox.Clear();
-            _systemMessage ??= new LlmMessage(ChatRole.System, _userSettings.SystemPrompt);
+            _systemMessage ??= new LlmMessage(ChatRole.System, SummarizationService.FollowupSystemPrompt);
 
             var llmInput = GetLlmTranscript();
             var estTokens = llmInput.Length / 4;
@@ -512,7 +512,7 @@ namespace MeetingMinutes
                 if (isFirst)
                 {
                     var result = await _summarizationService.SummarizeAsync(
-                        new SummarizationRequest(GetLlmTranscript(), _userSettings.SystemPrompt, _userSettings.OllamaModel, _lastSegments.Count > 0 ? _lastSegments : null),
+                        new SummarizationRequest(GetLlmTranscript(), _userSettings.OllamaModel, _lastSegments.Count > 0 ? _lastSegments : null),
                         onChunkStarted: (current, total) => Dispatcher.Invoke(() =>
                             reply.Content = $"[{current}/{total}] "),
                         onToken: token => Dispatcher.Invoke(() =>

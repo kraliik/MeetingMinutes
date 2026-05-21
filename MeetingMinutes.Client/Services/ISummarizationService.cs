@@ -2,7 +2,6 @@ namespace MeetingMinutes.Services;
 
 public record SummarizationRequest(
     string Transcript,
-    string SystemPrompt,
     string Model,
     IReadOnlyList<TranscriptSegment>? Segments = null);
 

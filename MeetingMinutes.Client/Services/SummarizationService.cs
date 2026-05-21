@@ -11,6 +11,12 @@ public class SummarizationService(ILlmService llm) : ISummarizationService
 {
     private const int CharsPerToken = 4;
 
+    public const string FollowupSystemPrompt =
+        "Jsi asistent pro práci s přepisem a shrnutím schůzky. Odpovídej výhradně česky. " +
+        "Odpovídej pouze na základě dosavadní konverzace a přepisu — nic si nevymýšlej. " +
+        "Pokud informace v přepisu chybí, napiš \"není uvedeno\". " +
+        "Buď stručný a věcný. Zachovej původní význam výroků z přepisu — neinterpretuj je vlastními slovy.";
+
     private const string MapSystemPrompt =
         "Jsi asistent pro analýzu schůzek. Přečti část přepisu schůzky a vrať POUZE JSON objekt " +
         "odpovídající tomuto schématu (žádný jiný text, žádné Markdown ohrady):\n" +
