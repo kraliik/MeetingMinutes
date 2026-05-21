@@ -11,4 +11,11 @@ public interface ILlmService
         string model,
         Action<string> onChunk,
         CancellationToken cancellationToken = default);
+
+    Task<string> CompleteJsonAsync(
+        IReadOnlyList<LlmMessage> messages,
+        string model,
+        CancellationToken ct = default);
+
+    Task<int> GetContextLengthAsync(string model, CancellationToken ct = default);
 }

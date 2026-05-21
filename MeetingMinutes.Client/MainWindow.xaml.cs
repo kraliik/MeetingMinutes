@@ -4,8 +4,10 @@ using MeetingMinutes.Services;
 using MeetingMinutes.Settings;
 using MeetingMinutes.ViewModels;
 using OllamaSharp.Models.Chat;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -30,16 +32,22 @@ namespace MeetingMinutes
 
         private string? _pendingWavPath;
         private string? _pendingTempWav;
+        private List<TranscriptSegment> _lastSegments = new();
+        private bool _suppressTextChanged = false;
+        private bool _renameDialogShown = false;
         private LlmMessage? _systemMessage;
+        private CancellationTokenSource? _summarizeCts;
         public ObservableCollection<ChatMessage> ChatMessages { get; } = new();
         private UserSettingsData _userSettings = UserSettings.Load();
         private readonly ITranscriptionService _transcriptionService;
         private readonly ISummarizationService _summarizationService;
+        private readonly ILlmService _llm;
 
         public MainWindow()
         {
+            _llm = ServiceFactory.CreateLlmService();
             _transcriptionService = ServiceFactory.CreateTranscriptionService();
-            _summarizationService = ServiceFactory.CreateSummarizationService();
+            _summarizationService = ServiceFactory.CreateSummarizationService(_llm);
             InitializeComponent();
             DataContext = this;
             _uiTimer.Tick += (_, _) =>
@@ -57,6 +65,8 @@ namespace MeetingMinutes
                 File.Delete(_pendingTempWav);
             _pendingTempWav = null;
             _pendingWavPath = null;
+            _lastSegments.Clear();
+            _renameDialogShown = false;
             TranscribeButton.IsEnabled = false;
 
             TranscriptBox.Clear();
@@ -187,6 +197,7 @@ namespace MeetingMinutes
 
         private void TranscriptBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
+            if (_suppressTextChanged) return;
             _systemMessage = null;
             SummarizeButton.IsEnabled = !string.IsNullOrWhiteSpace(TranscriptBox.Text);
         }
@@ -195,6 +206,23 @@ namespace MeetingMinutes
         {
             ChatMessages.Clear();
             ClearChatButton.IsEnabled = false;
+        }
+
+        private void MarkdownViewer_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is Markdig.Wpf.MarkdownViewer viewer &&
+                viewer.DataContext is ChatMessage msg)
+            {
+                try
+                {
+                    _ = viewer.Document;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"MarkdownViewer render failed: {ex.Message}");
+                    msg.IsStreaming = true;
+                }
+            }
         }
 
         private async void SettingsButton_Click(object sender, RoutedEventArgs e) =>
@@ -229,6 +257,8 @@ namespace MeetingMinutes
                 File.Delete(_pendingTempWav);
             _pendingTempWav = null;
             _pendingWavPath = null;
+            _lastSegments.Clear();
+            _renameDialogShown = false;
 
             TranscribeButton.IsEnabled = false;
             SummarizeButton.IsEnabled = false;
@@ -315,6 +345,7 @@ namespace MeetingMinutes
                         TranscriptBox.ScrollToEnd();
                     }));
 
+                _lastSegments = segments.ToList();
                 var transcript = FormatTranscript(segments);
 
                 Dispatcher.Invoke(() =>
@@ -327,6 +358,15 @@ namespace MeetingMinutes
                     SummarizeButton.IsEnabled = true;
                     ImportButton.IsEnabled = true;
                 });
+
+                try
+                {
+                    await PromptSpeakerRenameAsync();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Rename failed: {ex}");
+                }
             }
             catch (Exception ex)
             {
@@ -338,7 +378,7 @@ namespace MeetingMinutes
             }
         }
 
-        private static string FormatTranscript(IReadOnlyList<TranscriptSegment> segments)
+        private static string FormatForDisplay(IReadOnlyList<TranscriptSegment> segments)
         {
             var sb = new StringBuilder();
             foreach (var s in segments)
@@ -349,8 +389,91 @@ namespace MeetingMinutes
             return sb.ToString();
         }
 
+        private static string FormatForLlm(IReadOnlyList<TranscriptSegment> segments)
+        {
+            var sb = new StringBuilder();
+            foreach (var s in segments)
+                sb.AppendLine($"{s.Speaker}: {s.Text}");
+            return sb.ToString();
+        }
+
+        private static string FormatTranscript(IReadOnlyList<TranscriptSegment> segments) =>
+            FormatForDisplay(segments);
+
+        private string GetLlmTranscript()
+        {
+            if (_lastSegments.Count > 0 && TranscriptBox.Text != FormatForDisplay(_lastSegments))
+                _lastSegments.Clear();
+            return _lastSegments.Count > 0 ? FormatForLlm(_lastSegments) : TranscriptBox.Text;
+        }
+
+        private async Task PromptSpeakerRenameAsync()
+        {
+            if (_renameDialogShown) return;
+            _renameDialogShown = true;
+
+            var uniqueLabels = _lastSegments.Select(s => s.Speaker).Distinct().OrderBy(s => s).ToList();
+            if (uniqueLabels.Count == 0) return;
+
+            var segmentsSnapshot = _lastSegments;
+
+            StartButton.IsEnabled = false;
+            ImportButton.IsEnabled = false;
+            try
+            {
+                var result = await MaterialDesignThemes.Wpf.DialogHost.Show(
+                    new Dialogs.SpeakerRenameDialogView(uniqueLabels), "RootDialog");
+
+                if (result is not Dictionary<string, string> renameMap) return;
+
+                if (!object.ReferenceEquals(segmentsSnapshot, _lastSegments))
+                {
+                    Debug.WriteLine("Rename aborted: segments changed during dialog");
+                    return;
+                }
+
+                if (TranscriptBox.Text != FormatForDisplay(_lastSegments))
+                {
+                    WarningSnackbar.MessageQueue?.Enqueue("Manuální úpravy v boxu — přejmenování zrušeno");
+                    return;
+                }
+
+                _lastSegments = _lastSegments
+                    .Select(s => s with
+                    {
+                        Speaker = renameMap.TryGetValue(s.Speaker, out var n) && !string.IsNullOrWhiteSpace(n)
+                            ? n
+                            : s.Speaker
+                    })
+                    .ToList();
+
+                var newDisplay = FormatForDisplay(_lastSegments);
+                _suppressTextChanged = true;
+                try
+                {
+                    TranscriptBox.Clear();
+                    TranscriptBox.AppendText(newDisplay);
+                }
+                finally
+                {
+                    _suppressTextChanged = false;
+                }
+            }
+            finally
+            {
+                StartButton.IsEnabled = true;
+                ImportButton.IsEnabled = true;
+            }
+        }
+
         private async void SummarizeButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_summarizeCts != null && !_summarizeCts.IsCancellationRequested)
+            {
+                _summarizeCts.Cancel();
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(TranscriptBox.Text))
             {
                 MessageBox.Show("Není k dispozici žádný přepis.");
@@ -361,9 +484,20 @@ namespace MeetingMinutes
                 ? "Vytvoř shrnutí schůzky."
                 : PromptBox.Text;
 
-            SummarizeButton.IsEnabled = false;
+            _summarizeCts = new CancellationTokenSource();
+            SummarizeButton.Content = "Zrušit";
+            SummarizeButton.ToolTip = "Klikněte pro zrušení";
             PromptBox.Clear();
             _systemMessage ??= new LlmMessage(ChatRole.System, _userSettings.SystemPrompt);
+
+            var llmInput = GetLlmTranscript();
+            var estTokens = llmInput.Length / 4;
+            var ctxLimit = await _llm.GetContextLengthAsync(_userSettings.OllamaModel, CancellationToken.None);
+            if (ctxLimit > 0 && estTokens > ctxLimit * 0.8)
+            {
+                WarningSnackbar.MessageQueue?.Enqueue(
+                    $"Přepis (~{estTokens} tokenů) se blíží limitu modelu {_userSettings.OllamaModel} ({ctxLimit}). Zvaž větší model.");
+            }
 
             bool isFirst = ChatMessages.Count == 0;
             ChatMessages.Add(new ChatMessage(isUser: true, content: userText));
@@ -377,15 +511,28 @@ namespace MeetingMinutes
             {
                 if (isFirst)
                 {
-                    await _summarizationService.SummarizeAsync(
-                        new SummarizationRequest(TranscriptBox.Text, _userSettings.SystemPrompt, _userSettings.OllamaModel),
+                    var result = await _summarizationService.SummarizeAsync(
+                        new SummarizationRequest(GetLlmTranscript(), _userSettings.SystemPrompt, _userSettings.OllamaModel, _lastSegments.Count > 0 ? _lastSegments : null),
                         onChunkStarted: (current, total) => Dispatcher.Invoke(() =>
                             reply.Content = $"[{current}/{total}] "),
                         onToken: token => Dispatcher.Invoke(() =>
                         {
                             reply.Content += token;
                             ChatScrollViewer.ScrollToEnd();
-                        }));
+                        }),
+                        cancellationToken: _summarizeCts.Token);
+
+                    var ratio = result.MapSuccessRatio;
+                    if (ratio < 0.5)
+                    {
+                        Dispatcher.Invoke(() =>
+                            WarningSnackbar.MessageQueue?.Enqueue(
+                                $"Některé části přepisu se nepodařilo zpracovat (úspěšnost {ratio:P0})"));
+                    }
+                    else if (ratio < 1.0)
+                    {
+                        Debug.WriteLine($"Partial Map success: {ratio:P0}");
+                    }
                 }
                 else
                 {
@@ -396,12 +543,21 @@ namespace MeetingMinutes
                     await _summarizationService.ContinueAsync(
                         messages,
                         _userSettings.OllamaModel,
-                        onToken: chunk =>
+                        onToken: chunk => Dispatcher.Invoke(() =>
                         {
                             reply.Content += chunk;
                             ChatScrollViewer.ScrollToEnd();
-                        });
+                        }),
+                        cancellationToken: _summarizeCts.Token);
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                reply.Content += "\n\n[Zrušeno uživatelem]";
+            }
+            catch (Services.SummarizationFailedException ex)
+            {
+                reply.Content = $"[Chyba: {ex.Message}]";
             }
             catch (Exception ex)
             {
@@ -409,7 +565,12 @@ namespace MeetingMinutes
             }
             finally
             {
-                SummarizeButton.IsEnabled = true;
+                reply.IsStreaming = false;
+                SummarizeButton.Content = new MaterialDesignThemes.Wpf.PackIcon { Kind = MaterialDesignThemes.Wpf.PackIconKind.Send };
+                SummarizeButton.ToolTip = "Odeslat";
+                SummarizeButton.IsEnabled = !string.IsNullOrWhiteSpace(TranscriptBox.Text);
+                _summarizeCts?.Dispose();
+                _summarizeCts = null;
             }
         }
 

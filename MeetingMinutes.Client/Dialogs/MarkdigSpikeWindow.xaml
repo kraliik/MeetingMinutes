@@ -1,0 +1,15 @@
+<Window x:Class="MeetingMinutes.Dialogs.MarkdigSpikeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf"
+        Title="Markdig Spike"
+        Height="400" Width="600">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/Markdig.Wpf;component/Styles/Markdown.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <md:MarkdownViewer x:Name="Viewer" Margin="12"/>
+</Window>

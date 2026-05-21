@@ -13,7 +13,24 @@ from services.diarization_service import DiarizationService
 
 
 SAMPLE_RATE = 16000
-MIN_DUR = 0.3
+MIN_DUR = 0.15
+MERGE_GAP_S = 1.5
+
+
+def _merge_adjacent_turns(
+    turns: list[tuple[float, float, str]],
+    max_gap: float = MERGE_GAP_S,
+) -> list[tuple[float, float, str]]:
+    coalesced: list[tuple[float, float, str]] = []
+    for s, e, spk in turns:
+        if coalesced:
+            ps, pe, pspk = coalesced[-1]
+            if pspk == spk and s >= pe and (s - pe) < max_gap:
+                coalesced[-1] = (ps, e, pspk)
+                continue
+        coalesced.append((s, e, spk))
+    return coalesced
+
 
 _model_cache: dict[str, nemo_asr.models.ASRModel] = {}
 
@@ -66,19 +83,27 @@ def _transcribe_segments(
     if sr_native != SAMPLE_RATE:
         y_full = librosa.resample(y_full, orig_sr=sr_native, target_sr=SAMPLE_RATE)
 
-    valid_turns = [(s, e, spk) for s, e, spk in turns if (e - s) >= MIN_DUR]
-    if not valid_turns:
+    merged_short: list[tuple[float, float, str]] = []
+    for s, e, spk in turns:
+        if (e - s) >= MIN_DUR:
+            merged_short.append((s, e, spk))
+        elif merged_short:
+            ps, _, pspk = merged_short[-1]
+            merged_short[-1] = (ps, e, pspk)
+
+    coalesced = _merge_adjacent_turns(merged_short)
+    if not coalesced:
         return []
 
     temp_files: list[str] = []
     try:
-        for s, e, _ in valid_turns:
+        for s, e, _ in coalesced:
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             sf.write(tmp.name, y_full[int(s * SAMPLE_RATE):int(e * SAMPLE_RATE)], SAMPLE_RATE)
             tmp.close()
             temp_files.append(tmp.name)
 
-        progress(f"Přepisuji {len(valid_turns)} segmentů s {model_name}...")
+        progress(f"Přepisuji {len(coalesced)} segmentů s {model_name}...")
         with contextlib.redirect_stdout(sys.stderr):
             transcriptions = model.transcribe(temp_files, **transcribe_kwargs)
     finally:
@@ -89,7 +114,7 @@ def _transcribe_segments(
                 pass
 
     result = []
-    for (s, e, spk), hyp in zip(valid_turns, transcriptions):
+    for (s, e, spk), hyp in zip(coalesced, transcriptions):
         text = (hyp.text if hasattr(hyp, "text") else str(hyp)).strip()
         if text:
             result.append({"start": s, "end": e, "speaker": spk, "text": text})

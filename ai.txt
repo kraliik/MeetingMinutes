@@ -1,0 +1,2 @@
+# ai.txt — AI agent entrypoint for this project
+# See AGENTS.md for full context.

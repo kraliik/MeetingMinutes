@@ -6,6 +6,7 @@
         xmlns:local="clr-namespace:MeetingMinutes"
         xmlns:vm="clr-namespace:MeetingMinutes.ViewModels"
         xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        xmlns:md="clr-namespace:Markdig.Wpf;assembly=Markdig.Wpf"
         mc:Ignorable="d"
         Title="Meeting Minutes"
         Height="600" Width="900"
@@ -18,6 +19,13 @@
         FontFamily="{DynamicResource MaterialDesignFont}"
         Style="{StaticResource MaterialDesignWindow}">
 
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/Markdig.Wpf;component/Styles/Markdown.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
     <materialDesign:DialogHost Identifier="RootDialog">
     <materialDesign:Card Margin="8" Padding="8"
                          materialDesign:ElevationAssist.Elevation="Dp4">
@@ -156,22 +164,50 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
-                                    <TextBox Text="{Binding Content}" TextWrapping="Wrap"
-                                             IsReadOnly="True">
-                                        <TextBox.Style>
-                                            <Style TargetType="TextBox">
-                                                <Setter Property="BorderThickness" Value="0"/>
-                                                <Setter Property="Background" Value="Transparent"/>
-                                                <Setter Property="Padding" Value="0"/>
-                                                <Setter Property="Foreground" Value="{DynamicResource PrimaryHueMidForegroundBrush}"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsUser}" Value="False">
-                                                        <Setter Property="Foreground" Value="{DynamicResource MaterialDesignBody}"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBox.Style>
-                                    </TextBox>
+                                    <Grid>
+                                        <TextBox Text="{Binding Content}" TextWrapping="Wrap"
+                                                 IsReadOnly="True">
+                                            <TextBox.Style>
+                                                <Style TargetType="TextBox">
+                                                    <Setter Property="BorderThickness" Value="0"/>
+                                                    <Setter Property="Background" Value="Transparent"/>
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryHueMidForegroundBrush}"/>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsUser}" Value="False">
+                                                            <Setter Property="Foreground" Value="{DynamicResource MaterialDesignBody}"/>
+                                                        </DataTrigger>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding IsUser}" Value="False"/>
+                                                                <Condition Binding="{Binding IsStreaming}" Value="False"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBox.Style>
+                                        </TextBox>
+                                        <md:MarkdownViewer Markdown="{Binding Content}"
+                                                           x:Name="MarkdownView"
+                                                           Loaded="MarkdownViewer_Loaded">
+                                            <md:MarkdownViewer.Style>
+                                                <Style TargetType="md:MarkdownViewer">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding IsUser}" Value="False"/>
+                                                                <Condition Binding="{Binding IsStreaming}" Value="False"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </md:MarkdownViewer.Style>
+                                        </md:MarkdownViewer>
+                                    </Grid>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -223,6 +259,15 @@
                     </Grid>
                 </Border>
             </Grid>
+            <materialDesign:Snackbar x:Name="WarningSnackbar"
+                                     Grid.Row="0" Grid.RowSpan="3"
+                                     Grid.Column="0" Grid.ColumnSpan="3"
+                                     HorizontalAlignment="Stretch"
+                                     VerticalAlignment="Bottom">
+                <materialDesign:Snackbar.MessageQueue>
+                    <materialDesign:SnackbarMessageQueue/>
+                </materialDesign:Snackbar.MessageQueue>
+            </materialDesign:Snackbar>
         </Grid>
     </materialDesign:Card>
     </materialDesign:DialogHost>
